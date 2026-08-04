@@ -409,6 +409,45 @@ table.token-table tbody tr:hover { background: var(--surface-hover); }
 .empty-watchlist .glyph { font-size: 34px; margin-bottom: 12px; }
 
 /* ---------------------------------------------------------------------- */
+/* Footer / donation                                                       */
+/* ---------------------------------------------------------------------- */
+
+.site-footer {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px 20px 40px;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.site-footer a { color: var(--accent); }
+.donate-row {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+}
+.donate-label { font-size: 12px; color: var(--copper); white-space: nowrap; }
+.donate-address {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  text-align: left;
+  padding: 0;
+  transition: color 0.15s;
+}
+.donate-address:hover { color: var(--accent); }
+
+/* ---------------------------------------------------------------------- */
 /* Utility badges                                                          */
 /* ---------------------------------------------------------------------- */
 
@@ -427,6 +466,22 @@ table.token-table tbody tr:hover { background: var(--surface-hover); }
   .radar-sweep { display: none; }
   .hero h1 { font-size: 24px; }
   .detail-price { text-align: left; }
+}
+
+/* auto-fit with a minmax floor divides unevenly at phone widths (e.g. a
+   lone 3rd card stretching to fill a row by itself) — lock to a clean 2x2
+   grid instead so every stat/metric card matches its neighbor's width. */
+@media (max-width: 640px) {
+  .stat-grid,
+  .metric-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 380px) {
+  .stat-grid,
+  .metric-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Visible keyboard focus everywhere */
