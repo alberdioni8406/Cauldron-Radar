@@ -702,15 +702,22 @@
       candles = [];
     }
 
-    wrap.innerHTML = '<canvas id="priceChartCanvas"></canvas>';
-    const ctx = document.getElementById('priceChartCanvas').getContext('2d');
-
-    if (priceChart) { priceChart.destroy(); priceChart = null; }
-
     if (!candles.length) {
       wrap.innerHTML = `<div class="state-panel" style="padding:40px 20px"><h3>No trade history in this window</h3><p>This token had no recorded Cauldron trades in the selected range — try a wider range or check back after more activity.</p></div>`;
       return;
     }
+
+    if (typeof Chart === 'undefined') {
+      // The chart library didn't load (e.g. the CDN was briefly unreachable).
+      // Don't leave a blank canvas — say so and let the person retry.
+      wrap.innerHTML = `<div class="state-panel error" style="padding:40px 20px"><h3>Chart library didn't load</h3><p>The price data is fine, but the charting library failed to load from its CDN. <button class="btn small" onclick="location.reload()">Reload the page</button></p></div>`;
+      return;
+    }
+
+    wrap.innerHTML = '<canvas id="priceChartCanvas"></canvas>';
+    const ctx = document.getElementById('priceChartCanvas').getContext('2d');
+
+    if (priceChart) { priceChart.destroy(); priceChart = null; }
 
     const scale = 10 ** decimals;
     const labels = candles.map((c) => new Date(c.time * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
@@ -976,6 +983,16 @@
       if (route === 'dashboard' || route === 'tokens' || route === 'watchlist') router();
     }).catch(() => {});
   }, 60_000);
+
+  const donateBtn = document.getElementById('donateAddrBtn');
+  if (donateBtn) {
+    donateBtn.addEventListener('click', () => {
+      navigator.clipboard?.writeText(donateBtn.dataset.copy);
+      const original = donateBtn.textContent;
+      donateBtn.textContent = 'Copied address ✓';
+      setTimeout(() => (donateBtn.textContent = original), 1400);
+    });
+  }
 
   // Boot
   router();
