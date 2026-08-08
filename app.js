@@ -166,17 +166,19 @@
    * missing entirely.
    */
   function tokenTvlBreakdown(t) {
-    const decimals = tokenDecimals(t);
-    const bchSideSats = t.tvl_sats || 0;
-    let tokenSideSats;
-    if (t.tvl_tokens != null && t.price_now != null) {
-      const wholeTokens = t.tvl_tokens / 10 ** decimals;
-      tokenSideSats = wholeTokens * t.price_now; // price_now = sats per whole token
-    } else {
-      tokenSideSats = bchSideSats; // no price data — assume symmetric rather than zero
-    }
-    return { bchSideSats, tokenSideSats, totalSats: bchSideSats + tokenSideSats };
-  }
+  const bchSideSats = Number(t.tvl_sats) || 0;
+
+  // Cauldron pools contain equal economic value on both sides.
+  // The indexer's TVL currently represents only the BCH side.
+  // Therefore, count both sides.
+  const tokenSideSats = bchSideSats;
+
+  return {
+    bchSideSats,
+    tokenSideSats,
+    totalSats: bchSideSats + tokenSideSats
+  };
+}
 
   // -----------------------------------------------------------------------
   // Local state: token cache, watchlist, "seen before" set for new-pool badges
