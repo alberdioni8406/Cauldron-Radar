@@ -2,7 +2,7 @@
 
 Live analytics dashboard for the Bitcoin Cash CashToken DeFi ecosystem, built on the
 official [Cauldron protocol indexer](https://docs.riftenlabs.com/cauldron/API/cauldron/)
-from Riften Labs. Part of the [BCH Lab](https://cashcompass.space) family:
+from Riften Labs. Part of the [BCH Lab](https://cashcompass-bch.vercel.app) family:
 
 ```
 BCH Lab
@@ -28,6 +28,18 @@ empty/error states are shown explicitly when the indexer has nothing to return.
 | Pool Explorer | `/pool/active` (aggregated per-token, see limitation below) |
 | Activity feed | `/tx/latest` |
 | Watchlist | `/tokens/list_cached_by_ids` + browser `localStorage` |
+| Trade entry point | Deep-links to `app.cauldron.quest`'s per-token trade route couldn't be confirmed from the docs, so the "Trade on Cauldron" button opens the general token list there rather than guessing a URL that might 404. |
+| Tx verification | `https://bchexplorer.cash/tx/<txid>` (was `explorer.bitcoinunlimited.info`, now offline) |
+
+## TVL methodology
+
+TVL is the combined value of **both sides** of every pool: BCH-side reserves plus the
+token-side reserves converted to a BCH-equivalent using that token's own market price
+(`price_now` from `/tokens/list_cached`). For a pool trading near the broader market
+price this lands close to 2× the BCH-side alone; for a stale or mispriced pool it won't
+— the token side is priced independently, not forced to double. See `tokenTvlBreakdown()`
+and `poolTvlSats()` in `app.js`. This replaced an earlier version that only summed the
+BCH side (via `/valuelocked`), which under-reported TVL by roughly half.
 
 ## Known API limitations (read this before extending the app)
 
