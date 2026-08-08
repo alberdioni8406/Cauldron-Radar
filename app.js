@@ -82,15 +82,31 @@
   }
 
   function fmtBch(sats) {
-    if (sats === null || sats === undefined || Number.isNaN(sats)) return '—';
-    const bch = sats / SATS_PER_BCH;
-    // Amounts under ~1000 sats (0.00001 BCH) round away to "0.000000 BCH" at
-    // our display precision, which hides real information — show sats instead.
-    if (sats !== 0 && Math.abs(sats) < 1000) {
-      const satsAbs = Math.abs(sats);
-      const satsStr = Number.isInteger(satsAbs) ? satsAbs.toLocaleString() : satsAbs.toFixed(satsAbs < 10 ? 2 : 1);
-      return (sats < 0 ? '-' : '') + '~' + satsStr + ' sats';
-    }
+  if (sats === null || sats === undefined || Number.isNaN(sats)) return '—';
+
+  const bch = sats / SATS_PER_BCH;
+
+  if (sats !== 0 && Math.abs(sats) < 1000) {
+    const satsAbs = Math.abs(sats);
+    const satsStr = Number.isInteger(satsAbs)
+      ? satsAbs.toLocaleString()
+      : satsAbs.toFixed(satsAbs < 10 ? 2 : 1);
+
+    return (sats < 0 ? '-' : '') + '~' + satsStr + ' sats';
+  }
+
+  // Show exact BCH value instead of compact notation
+  if (Math.abs(bch) >= 1000) {
+    return bch.toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }) + ' BCH';
+  }
+
+  return bch.toLocaleString('en-US', {
+    maximumFractionDigits: bch < 1 ? 6 : 4
+  }) + ' BCH';
+         }
     if (Math.abs(bch) >= 1000) return compact(bch) + ' BCH';
     return bch.toLocaleString('en-US', { maximumFractionDigits: bch < 1 ? 6 : 4 }) + ' BCH';
   }
