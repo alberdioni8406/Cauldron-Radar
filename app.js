@@ -84,6 +84,13 @@
   function fmtBch(sats) {
     if (sats === null || sats === undefined || Number.isNaN(sats)) return '—';
     const bch = sats / SATS_PER_BCH;
+    // Amounts under ~1000 sats (0.00001 BCH) round away to "0.000000 BCH" at
+    // our display precision, which hides real information — show sats instead.
+    if (sats !== 0 && Math.abs(sats) < 1000) {
+      const satsAbs = Math.abs(sats);
+      const satsStr = Number.isInteger(satsAbs) ? satsAbs.toLocaleString() : satsAbs.toFixed(satsAbs < 10 ? 2 : 1);
+      return (sats < 0 ? '-' : '') + '~' + satsStr + ' sats';
+    }
     if (Math.abs(bch) >= 1000) return compact(bch) + ' BCH';
     return bch.toLocaleString('en-US', { maximumFractionDigits: bch < 1 ? 6 : 4 }) + ' BCH';
   }
@@ -145,6 +152,30 @@
     const url = resolveIcon(t.bcmr && t.bcmr.uris);
     if (url) return `<img class="token-icon" width="${size}" height="${size}" src="${url}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'token-icon placeholder',textContent:'${escapeHtml(tokenDisplaySymbol(t).slice(0, 2) || '?')}',style:'width:${size}px;height:${size}px'}))">`;
     return `<span class="token-icon placeholder" style="width:${size}px;height:${size}px;display:inline-flex">${escapeHtml(tokenDisplaySymbol(t).slice(0, 2) || '?')}</span>`;
+  }
+
+  /**
+   * TVL correction: the indexer's tvl_sats / global /valuelocked figures only
+   * count the BCH side of each pool. A pool's token-side reserves represent
+   * real economic value too, so correct TVL = BCH-side value + token-side
+   * value. We convert the token side to a BCH-equivalent using the token's
+   * own market price (price_now, sats-per-whole-token from list_cached) —
+   * not the pool's own internal ratio — so an under- or over-priced pool
+   * shows up as genuinely unbalanced rather than being forced to 2x.
+   * Falls back to treating the pool as balanced only when price data is
+   * missing entirely.
+   */
+  function tokenTvlBreakdown(t) {
+    const decimals = tokenDecimals(t);
+    const bchSideSats = t.tvl_sats || 0;
+    let tokenSideSats;
+    if (t.tvl_tokens != null && t.price_now != null) {
+      const wholeTokens = t.tvl_tokens / 10 ** decimals;
+      tokenSideSats = wholeTokens * t.price_now; // price_now = sats per whole token
+    } else {
+      tokenSideSats = bchSideSats; // no price data — assume symmetric rather than zero
+    }
+    return { bchSideSats, tokenSideSats, totalSats: bchSideSats + tokenSideSats };
   }
 
   // -----------------------------------------------------------------------
@@ -261,20 +292,24 @@
   // View: Dashboard Overview
   // -----------------------------------------------------------------------
 
-  async function renderDashboard() {
-    appEl.innerHTML = loadingPanel();
+  async function renderDashboard(silent = false) {
+    if (!silent) appEl.innerHTML = loadingPanel();
 
-    const [tokens, contractCount, valueLocked, volume24h, latestTx] = await Promise.all([
+    const [tokens, contractCount, volume24h, latestTx] = await Promise.all([
       loadTokens(),
       cauldron('contract/count').catch(() => null),
-      cauldron('valuelocked').catch(() => null),
       cauldron('volume').catch(() => null),
       cauldron('tx/latest', { limit: 8 }).catch(() => []),
     ]);
 
     const totalTokens = tokens.length >= 1000 ? '1000+' : tokens.length.toLocaleString();
     const activePools = contractCount ? contractCount.active.toLocaleString() : '—';
-    const tvl = valueLocked ? fmtBch(valueLocked.satoshis) : '—';
+    const allTimePools = contractCount ? (contractCount.active + contractCount.ended).toLocaleString() : '';
+    // Corrected TVL: sum BCH-side + token-side value across every tracked
+    // token (see tokenTvlBreakdown) rather than relying on /valuelocked,
+    // which only ever reported the BCH side.
+    const globalTvlSats = tokens.reduce((sum, t) => sum + tokenTvlBreakdown(t).totalSats, 0);
+    const tvl = fmtBch(globalTvlSats);
     const vol = volume24h ? fmtBch(volume24h.total_volume_sats) : '—';
 
     const trending = [...tokens]
@@ -292,8 +327,8 @@
         <p class="lede">Real-time prices, liquidity and trades from the Cauldron protocol indexer — no custody, no accounts, just the chain.</p>
         <div class="stat-grid">
           <div class="stat-card"><div class="stat-label">Tokens tracked</div><div class="stat-value">${totalTokens}</div><div class="stat-sub">via /tokens/list_cached</div></div>
-          <div class="stat-card"><div class="stat-label">Active liquidity pools</div><div class="stat-value">${activePools}</div><div class="stat-sub">${contractCount ? contractCount.ended.toLocaleString() + ' ended all-time' : ''}</div></div>
-          <div class="stat-card"><div class="stat-label">Total value locked</div><div class="stat-value">${tvl}</div><div class="stat-sub">across all Cauldron pools</div></div>
+          <div class="stat-card"><div class="stat-label">Active liquidity pools</div><div class="stat-value">${activePools}</div><div class="stat-sub">${allTimePools ? allTimePools + ' all-time' : ''}</div></div>
+          <div class="stat-card"><div class="stat-label">Total value locked</div><div class="stat-value">${tvl}</div><div class="stat-sub">BCH-side + token-side, combined</div></div>
           <div class="stat-card"><div class="stat-label">24h trading volume</div><div class="stat-value">${vol}</div><div class="stat-sub">all tokens, rolling 24h</div></div>
         </div>
       </section>
@@ -348,7 +383,7 @@
 
   function activityRow(tx) {
     const confirmed = !!tx.blockhash;
-    const explorerUrl = `https://explorer.bitcoinunlimited.info/tx/${tx.txid}`;
+    const explorerUrl = `https://bchexplorer.cash/tx/${tx.txid}`;
     return `
       <div class="activity-item ${confirmed ? 'confirmed' : 'pending'}">
         <span class="activity-dot" title="${confirmed ? 'Confirmed' : 'Unconfirmed'}"></span>
@@ -364,8 +399,8 @@
 
   const explorerState = { q: '', sortBy: 'tvl', order: 'desc', page: 1, pageSize: 25 };
 
-  async function renderTokensExplorer() {
-    appEl.innerHTML = loadingPanel();
+  async function renderTokensExplorer(silent = false) {
+    if (!silent) appEl.innerHTML = loadingPanel();
     const tokens = await loadTokens();
 
     const seen = SeenTokens.get();
@@ -484,7 +519,7 @@
           </td>
           <td class="mono">${t.price_now_usd != null ? fmtUsd(t.price_now_usd) : fmtBch(t.price_now)}</td>
           <td class="mono"><span class="pct ${pct.cls}">${pct.text}</span></td>
-          <td class="mono">${fmtBch(t.tvl_sats)}</td>
+          <td class="mono">${fmtBch(tokenTvlBreakdown(t).totalSats)}</td>
           <td class="mono">${fmtBch(t.trade_volume)}</td>
           <td><button class="watch-btn ${watching ? 'active' : ''}" data-watch="${escapeHtml(t.token_id)}" title="Toggle watchlist">${watching ? '★' : '☆'}</button></td>
         </tr>`;
@@ -520,20 +555,25 @@
   }
 
   function exportTokensCsv(tokens) {
-    const headers = ['token_id', 'name', 'symbol', 'decimals', 'price_bch', 'price_usd', 'change_24h_pct', 'tvl_sats', 'trade_volume_sats', 'score', 'score_rank'];
-    const rows = tokens.map((t) => [
-      t.token_id,
-      csvSafe(tokenDisplayName(t)),
-      csvSafe(tokenDisplaySymbol(t)),
-      tokenDecimals(t),
-      t.price_now ?? '',
-      t.price_now_usd ?? '',
-      t.change_24h_usd_bp !== undefined ? (t.change_24h_usd_bp / 100).toFixed(2) : '',
-      t.tvl_sats ?? '',
-      t.trade_volume ?? '',
-      t.score ?? '',
-      t.score_rank ?? '',
-    ]);
+    const headers = ['token_id', 'name', 'symbol', 'decimals', 'price_bch', 'price_usd', 'change_24h_pct', 'tvl_bch_side_sats', 'tvl_token_side_sats_equiv', 'tvl_total_sats', 'trade_volume_sats', 'score', 'score_rank'];
+    const rows = tokens.map((t) => {
+      const tvl = tokenTvlBreakdown(t);
+      return [
+        t.token_id,
+        csvSafe(tokenDisplayName(t)),
+        csvSafe(tokenDisplaySymbol(t)),
+        tokenDecimals(t),
+        t.price_now ?? '',
+        t.price_now_usd ?? '',
+        t.change_24h_usd_bp !== undefined ? (t.change_24h_usd_bp / 100).toFixed(2) : '',
+        tvl.bchSideSats,
+        Math.round(tvl.tokenSideSats),
+        Math.round(tvl.totalSats),
+        t.trade_volume ?? '',
+        t.score ?? '',
+        t.score_rank ?? '',
+      ];
+    });
     const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const a = document.createElement('a');
@@ -573,10 +613,9 @@
     const webUrl = token.bcmr && token.bcmr.uris && token.bcmr.uris.web;
     const description = token.bcmr && token.bcmr.description;
 
-    const [poolsRes, firstPool, valueLocked, volume] = await Promise.all([
+    const [poolsRes, firstPool, volume] = await Promise.all([
       cauldron('pool/active', { token: tokenId }).catch(() => null),
       cauldron(`token/${tokenId}/first_pool`).catch(() => null),
-      cauldron(`valuelocked/${tokenId}`).catch(() => null),
       cauldron(`volume/${tokenId}`).catch(() => null),
     ]);
     const pools = (poolsRes && poolsRes.active) || [];
@@ -584,6 +623,13 @@
     const pct24 = fmtPctBp(token.change_24h_usd_bp);
     const pct7 = fmtPctBp(token.change_7d_usd_bp);
     const watching = Watchlist.has(tokenId);
+    const tvlBreak = tokenTvlBreakdown(token);
+    // Best-effort entry point into the Cauldron trading app. We can't confirm
+    // a per-token deep-link route from the indexer docs, so rather than
+    // invent a URL that might 404, we link to the token list on the live
+    // trading app and let the person search — a link that's always valid
+    // beats a guessed one that might be dead.
+    const cauldronTradeUrl = 'https://app.cauldron.quest/tokens';
 
     appEl.innerHTML = `
       <a href="#/tokens" class="btn ghost small" style="margin-bottom:18px;display:inline-flex">← Back to explorer</a>
@@ -600,6 +646,7 @@
         </div>
         <div class="detail-actions">
           <button class="btn ${watching ? '' : 'ghost'} small" id="watchToggleBtn">${watching ? '★ Watching' : '☆ Watch'}</button>
+          <a class="btn small" href="${cauldronTradeUrl}" target="_blank" rel="noopener" title="Opens the Cauldron trading app — search for this token there">⚗ Trade on Cauldron ↗</a>
           ${webUrl && webUrl !== 'null' ? `<a class="btn ghost small" href="${escapeHtml(webUrl)}" target="_blank" rel="noopener">Website ↗</a>` : ''}
         </div>
       </div>
@@ -612,10 +659,22 @@
       <div class="metric-row">
         <div class="metric-card"><div class="k">Price (BCH)</div><div class="v">${fmtBch(token.price_now)}</div></div>
         <div class="metric-card"><div class="k">7d change</div><div class="v"><span class="pct ${pct7.cls}">${pct7.text}</span></div></div>
-        <div class="metric-card"><div class="k">Value locked</div><div class="v">${valueLocked ? fmtBch(valueLocked.satoshis) : fmtBch(token.tvl_sats)}</div></div>
+        <div class="metric-card">
+          <div class="k">Value locked</div>
+          <div class="v">${fmtBch(tvlBreak.totalSats)}</div>
+          <div class="metric-sub">${fmtBch(tvlBreak.bchSideSats)} BCH + ${fmtBch(tvlBreak.tokenSideSats)} token-equiv</div>
+        </div>
         <div class="metric-card"><div class="k">24h volume</div><div class="v">${volume ? fmtBch(volume.volume_sats) : '—'}</div></div>
         <div class="metric-card"><div class="k">Active pools</div><div class="v">${pools.length}</div></div>
-        <div class="metric-card"><div class="k">Total supply (est.)</div><div class="v">${fmtTokenAmount(token.tvl_tokens)}</div></div>
+        <div class="metric-card"><div class="k">Tokens in pools</div><div class="v">${fmtTokenAmount(token.tvl_tokens / 10 ** decimals)}</div></div>
+      </div>
+
+      <div class="nav-strip">
+        <a href="#/tokens" class="nav-chip">🔎 Token Explorer</a>
+        <a href="#/pools" class="nav-chip">💧 Pool Explorer</a>
+        <a href="#/activity" class="nav-chip">📡 Activity Feed</a>
+        ${webUrl && webUrl !== 'null' ? `<a href="${escapeHtml(webUrl)}" target="_blank" rel="noopener" class="nav-chip">🌐 Project site</a>` : ''}
+        <a href="${cauldronTradeUrl}" target="_blank" rel="noopener" class="nav-chip">⚗ Trade on Cauldron</a>
       </div>
 
       <div class="card chart-card">
@@ -631,7 +690,7 @@
         <div class="card desc-card">
           <h3>About this token</h3>
           ${description ? `<p>${escapeHtml(description).slice(0, 900)}${description.length > 900 ? '…' : ''}</p>` : '<p style="color:var(--text-faint)">No on-chain BCMR metadata description was published for this token.</p>'}
-          ${firstPool ? `<p style="margin-top:10px" class="mono" style="font-size:12px">First pool created ${timeAgo(firstPool.timestamp)} (block ${firstPool.block_height}).</p>` : ''}
+          ${firstPool ? `<p style="margin-top:10px" class="mono" style="font-size:12px">First pool created ${timeAgo(firstPool.timestamp)} (${firstPool.block_height ? 'block ' + firstPool.block_height : 'block unavailable'}).</p>` : ''}
         </div>
         <div class="card">
           <div class="section-head" style="padding:16px 16px 0"><h2>Active liquidity pools</h2></div>
@@ -795,7 +854,7 @@
           <span class="activity-dot"></span>
           <span class="activity-txid">${(ev.sats / SATS_PER_BCH).toFixed(4)} BCH ⇄ ${fmtTokenAmount(ev.tokens / 10 ** decimals)} tokens in pool</span>
           <span class="activity-time">${timeAgo(ev.timestamp)}</span>
-          <a class="activity-link" href="https://explorer.bitcoinunlimited.info/tx/${ev.txid}" target="_blank" rel="noopener">tx ↗</a>
+          <a class="activity-link" href="https://bchexplorer.cash/tx/${ev.txid}" target="_blank" rel="noopener">tx ↗</a>
         </div>`
           )
           .join('');
@@ -810,8 +869,8 @@
 
   const poolsState = { tab: 'liquidity' };
 
-  async function renderPools() {
-    appEl.innerHTML = loadingPanel('Aggregating active pools across top tokens…');
+  async function renderPools(silent = false) {
+    if (!silent) appEl.innerHTML = loadingPanel('Aggregating active pools across top tokens…');
     const tokens = await loadTokens();
     const topTokens = tokens.slice(0, 40); // see note below re: no bulk pool-list endpoint
 
@@ -850,10 +909,20 @@
     paintPools(allPools);
   }
 
+  /** A pool's TVL, same BCH-side + token-side methodology as tokenTvlBreakdown,
+   * but valued using this specific pool's own reserves rather than the
+   * token's aggregate totals. */
+  function poolTvlSats(p, token) {
+    const decimals = tokenDecimals(token);
+    const bchSideSats = p.sats || 0;
+    const tokenSideSats = token.price_now != null ? (p.tokens / 10 ** decimals) * token.price_now : bchSideSats;
+    return bchSideSats + tokenSideSats;
+  }
+
   function paintPools(allPools) {
     let sorted;
     if (poolsState.tab === 'liquidity') {
-      sorted = [...allPools].sort((a, b) => b.sats - a.sats);
+      sorted = [...allPools].sort((a, b) => poolTvlSats(b, b._token) - poolTvlSats(a, a._token));
     } else {
       sorted = [...allPools].sort((a, b) => (b._token.trade_volume || 0) - (a._token.trade_volume || 0));
     }
@@ -863,10 +932,12 @@
       .map((p) => {
         const t = p._token;
         const decimals = tokenDecimals(t);
+        const tvlSats = poolTvlSats(p, t);
         return `
         <div class="card pool-card">
           <div class="pool-pair">${tokenIconHtml(t, 22)} ${escapeHtml(tokenDisplaySymbol(t) || tokenDisplayName(t))} / BCH</div>
-          <div class="pool-meta"><span>Liquidity</span><span>${(p.sats / SATS_PER_BCH).toFixed(4)} BCH</span></div>
+          <div class="pool-meta"><span>Pool TVL</span><span>${fmtBch(tvlSats)}</span></div>
+          <div class="pool-meta"><span>BCH side</span><span>${(p.sats / SATS_PER_BCH).toFixed(4)} BCH</span></div>
           <div class="pool-meta"><span>Token side</span><span>${fmtTokenAmount(p.tokens / 10 ** decimals)}</span></div>
           <div class="pool-meta"><span>Token 24h volume</span><span>${fmtBch(t.trade_volume)}</span></div>
           <div class="pool-owner">Owner: ${p.owner_p2pkh_addr || p.owner_pkh}</div>
@@ -880,8 +951,8 @@
   // View: Activity feed
   // -----------------------------------------------------------------------
 
-  async function renderActivity() {
-    appEl.innerHTML = loadingPanel('Reading the latest Cauldron transactions…');
+  async function renderActivity(silent = false) {
+    if (!silent) appEl.innerHTML = loadingPanel('Reading the latest Cauldron transactions…');
     const txs = await cauldron('tx/latest', { limit: 100 }).catch(() => []);
 
     appEl.innerHTML = `
@@ -905,9 +976,10 @@
   // View: Watchlist
   // -----------------------------------------------------------------------
 
-  async function renderWatchlist() {
+  async function renderWatchlist(silent = false) {
     const ids = Watchlist.get();
     if (!ids.length) {
+      if (silent) return; // nothing to refresh
       appEl.innerHTML = `
         <div class="view-header"><div class="view-title">Watchlist</div></div>
         <div class="empty-watchlist card">
@@ -917,7 +989,7 @@
         </div>`;
       return;
     }
-    appEl.innerHTML = loadingPanel();
+    if (!silent) appEl.innerHTML = loadingPanel();
     const data = await cauldron('tokens/list_cached_by_ids', { ids: ids.join(',') }).catch(() => []);
     const tokens = Array.isArray(data) ? data : [];
 
@@ -938,7 +1010,7 @@
                 <td><a class="token-link" href="#/token/${encodeURIComponent(t.token_id)}">${tokenIconHtml(t, 28)}<span class="token-names"><span class="token-name">${escapeHtml(tokenDisplayName(t))}</span><span class="token-symbol">${escapeHtml(tokenDisplaySymbol(t))}</span></span></a></td>
                 <td class="mono">${t.price_now_usd != null ? fmtUsd(t.price_now_usd) : fmtBch(t.price_now)}</td>
                 <td class="mono"><span class="pct ${fmtPctBp(t.change_24h_usd_bp).cls}">${fmtPctBp(t.change_24h_usd_bp).text}</span></td>
-                <td class="mono">${fmtBch(t.tvl_sats)}</td>
+                <td class="mono">${fmtBch(tokenTvlBreakdown(t).totalSats)}</td>
                 <td class="mono">${fmtBch(t.trade_volume)}</td>
                 <td><button class="watch-btn active" data-unwatch="${escapeHtml(t.token_id)}" title="Remove from watchlist">★</button></td>
               </tr>`
@@ -962,26 +1034,41 @@
     // no-op placeholder retained for symmetry / future hooks
   }
 
+  /**
+   * Re-renders whichever view is currently on screen. When silent=true this
+   * never shows the full-page boot spinner — the view's own render function
+   * fetches fresh data first and only swaps the DOM once it has it, so the
+   * existing content stays visible the whole time (no blank flash, no
+   * scroll jump). Token detail pages already refresh their chart/pool-history
+   * sub-sections independently and aren't touched here.
+   */
+  async function refreshCurrentView(silent) {
+    const route = currentRoute().split('/')[0];
+    if (route === 'dashboard') return renderDashboard(silent);
+    if (route === 'tokens') return renderTokensExplorer(silent);
+    if (route === 'watchlist') return renderWatchlist(silent);
+    if (route === 'pools') return renderPools(silent);
+    if (route === 'activity') return renderActivity(silent);
+    return null; // token detail / unknown routes: nothing to silently refresh
+  }
+
   document.getElementById('refreshBtn').addEventListener('click', async () => {
     const btn = document.getElementById('refreshBtn');
     btn.classList.add('spinning');
     try {
       await loadTokens(true);
-      await router();
+      // Silent even on a manual click — the spin icon on the button is
+      // feedback enough; the page itself shouldn't blank out or jump.
+      await refreshCurrentView(true);
     } finally {
       btn.classList.remove('spinning');
     }
   });
 
-  // Passive auto-refresh every 60s so numbers stay current without spamming
-  // the indexer on every re-render.
+  // Passive auto-refresh every 60s so numbers stay current without ever
+  // showing the full-page spinner or blanking the view after first load.
   setInterval(() => {
-    loadTokens(true).then(() => {
-      // Only repaint if we're on a view that reads the shared token cache;
-      // token detail / activity fetch their own fresh data on navigation.
-      const route = currentRoute().split('/')[0];
-      if (route === 'dashboard' || route === 'tokens' || route === 'watchlist') router();
-    }).catch(() => {});
+    loadTokens(true).then(() => refreshCurrentView(true)).catch(() => {});
   }, 60_000);
 
   const donateBtn = document.getElementById('donateAddrBtn');
