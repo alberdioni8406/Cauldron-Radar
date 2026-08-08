@@ -345,6 +345,17 @@ table.token-table tbody tr:hover { background: var(--surface-hover); }
 .metric-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
 .metric-card .k { font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; color: var(--text-faint); letter-spacing: 0.06em; }
 .metric-card .v { font-family: var(--font-mono); font-size: 17px; font-weight: 700; margin-top: 5px; }
+.metric-card .metric-sub { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); margin-top: 4px; }
+
+/* Ecosystem navigation strip — put otherwise-empty space under the token
+   header to work: Analytics → Explorer/Pools/Activity → Project → Trade. */
+.nav-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
+.nav-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--surface); border: 1px solid var(--border); color: var(--text-dim);
+  padding: 7px 13px; border-radius: 999px; font-size: 12.5px; transition: border-color 0.15s, color 0.15s;
+}
+.nav-chip:hover { color: var(--accent); border-color: rgba(10,193,142,0.4); }
 
 .chart-card { padding: 18px; margin-bottom: 24px; }
 .chart-range-toggle { display: flex; gap: 6px; margin-bottom: 12px; }
