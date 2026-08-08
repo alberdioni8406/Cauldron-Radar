@@ -80,8 +80,7 @@
     if (n === null || n === undefined || Number.isNaN(n)) return '—';
     return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2, ...opts }).format(n);
   }
-
-  function fmtBch(sats) {
+function fmtBch(sats) {
   if (sats === null || sats === undefined || Number.isNaN(sats)) return '—';
 
   const bch = sats / SATS_PER_BCH;
@@ -95,7 +94,6 @@
     return (sats < 0 ? '-' : '') + '~' + satsStr + ' sats';
   }
 
-  // Show exact BCH value instead of compact notation
   if (Math.abs(bch) >= 1000) {
     return bch.toLocaleString('en-US', {
       minimumFractionDigits: 2,
@@ -106,11 +104,8 @@
   return bch.toLocaleString('en-US', {
     maximumFractionDigits: bch < 1 ? 6 : 4
   }) + ' BCH';
-         }
-    if (Math.abs(bch) >= 1000) return compact(bch) + ' BCH';
-    return bch.toLocaleString('en-US', { maximumFractionDigits: bch < 1 ? 6 : 4 }) + ' BCH';
-  }
-
+}
+  
   function fmtUsd(v) {
     if (v === null || v === undefined || Number.isNaN(v)) return '—';
     if (v === 0) return '$0.00';
