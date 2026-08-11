@@ -35,11 +35,57 @@ empty/error states are shown explicitly when the indexer has nothing to return.
 
 TVL is the combined value of **both sides** of every pool: BCH-side reserves plus the
 token-side reserves converted to a BCH-equivalent using that token's own market price
-(`price_now` from `/tokens/list_cached`). For a pool trading near the broader market
-price this lands close to 2× the BCH-side alone; for a stale or mispriced pool it won't
-— the token side is priced independently, not forced to double. See `tokenTvlBreakdown()`
-and `poolTvlSats()` in `app.js`. This replaced an earlier version that only summed the
-BCH side (via `/valuelocked`), which under-reported TVL by roughly half.
+(`price_now` from `/tokens/list_cached`). See `tokenTvlBreakdown()`, `poolTvlSats()` and
+`computeGlobalTvlSats()` in `app.js`.
+
+**Bug fix history:** an earlier version summed `tokenTvlBreakdown()` across all ~1000
+tracked tokens directly. That computation converts each token's raw pooled amount to a
+whole-token count via `10 ** decimals` — and for any token with no public BCMR
+registration (common), `decimals` silently defaulted to `0`. That treated raw base-unit
+counts as whole-token counts, inflating the token side by up to 10^decimals for those
+tokens and pushing the ecosystem-wide total to ~51,000,000 BCH instead of the real
+~3,290–3,300 BCH. Two fixes now guard against this:
+1. The token-side calculation only runs when BCMR-confirmed decimals exist; otherwise it
+   falls back to treating the pool as balanced (token side ≈ BCH side) rather than
+   guessing `decimals = 0`.
+2. A sanity clamp caps any single token's computed token-side value to roughly 20× its
+   BCH side — a correctly-scaled AMM pool's two sides sit in the same rough order of
+   magnitude, since that's how the price itself is derived.
+3. The **global** dashboard figure no longer sums per-token values directly at all — it
+   anchors to the indexer's own authoritative BCH-side-only `/valuelocked` call (a single
+   clean number) and scales it by a token-side ratio sampled from the 60 largest tokens by
+   TVL, so even an imperfect per-token estimate can't distort the ecosystem-wide total.
+
+## New in this update
+
+- **Multi-period volume** — 24h/7d/30d volume cards on the Dashboard and Token Detail
+  pages (`/volume` and `/volume/<token>` called with explicit `start`). The Explorer's
+  Volume column has a 24h/7d/30d selector too; since there's no bulk multi-period volume
+  endpoint, switching away from 24h only fetches `/volume/<token>` for the ~25 rows on
+  the current page (cached per token+period), not the whole table.
+- **Trade on Cauldron** — still can't confirm a per-token deep-link route for
+  `app.cauldron.quest` from the docs, so the button copies the token ID to the clipboard,
+  shows a toast, and opens the app's token list for pasting — real UX, no guessed/dead URL.
+- **APY leaderboard** — `/pool/aggregated_apy?token=<id>` has no bulk "all tokens" mode,
+  so this is computed per-token across the top 25 by TVL (a Dashboard mini-panel + a full
+  "Highest APY" tab in the Pool Explorer).
+- **Recently launched tokens** — enriches the existing local seen/unseen token diff
+  (`SeenTokens`) with `/token/<id>/first_pool` for a real creation date, bounded to just
+  the handful of tokens actually flagged new since your last visit.
+- **Whale LPs / liquidity concentration** — a "Whale LPs" tab in the Pool Explorer ranks
+  pool owners by total BCH locked (derived from already-fetched pool data, no extra
+  calls); token detail pages show the top LP's share of that token's pooled BCH, and
+  individual pool rows flag owners holding ≥20% of a token's liquidity.
+- **Historical TVL chart** — Dashboard and Token Detail pages chart `/valuelocked` (global
+  and per-token) sampled at 8 points over the last 30 days. Explicitly labeled as a
+  **BCH-side reference series**, not a re-derivation of the corrected combined TVL at each
+  past moment (that would mean re-pricing every token as of that timestamp — too
+  expensive client-side).
+- **7d liquidity Δ** on token pages, comparing current BCH-side lock to
+  `/valuelocked/<token>?time=<7d ago>`.
+- **"Hot" / unusual-volume flag** — a token is flagged 🔥 when its 24h volume is ≥50% of
+  its TVL (a turnover ratio computed from data already on hand). This is explicitly a
+  same-day activity signal, not a claim about a historical baseline the API doesn't expose.
 
 ## Known API limitations (read this before extending the app)
 
